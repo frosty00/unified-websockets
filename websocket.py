@@ -1,4 +1,5 @@
 import websockets
+import asyncio
 
 
 class UnifiedWebsocket:
@@ -18,6 +19,12 @@ class UnifiedWebsocket:
         await self.connect()
         return await self._connection.send(data)
 
-    async def recv(self, data):
+    async def recv(self):
         await self.connect()
-        return await self._connection.recv(data)
+        return await self._connection.recv()
+
+
+loop = asyncio.get_event_loop()
+ws = UnifiedWebsocket('wss://stream.binance.com:9443/ws/bnbbtc@kline_1d')
+print(loop.run_until_complete(ws.recv()))
+
