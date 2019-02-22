@@ -1,36 +1,90 @@
-let WebSocketClient = require('./websocket-client.js')
+const W3CWebSocket = require('websocket').w3cwebsocket;
+const WebSocketAsPromised = require('websocket-as-promised');
 
 
-class UnifiedWebsocket {
-    constructor (uri, protocol = undefined) {
-        this.uri = uri
-        this.protocol = protocol
-        this._connection = undefined
+function externallyResolvablePromise () {
+
+    let resolve, reject, bogusTimeout
+
+    const p = new Promise ((resolve_, reject_) => {
+        resolve = resolve_
+        reject = reject_
+        bogusTimeout = setTimeout (function () {}, 1000000000) // prevents unwanted process termination when no more event loop tasks left
+    })
+
+    p.resolved = false
+
+    p.resolve = function () {
+        p.resolved = true
+        clearTimeout (bogusTimeout)
+        resolve.apply (this, arguments)
     }
 
-    async connect () {
-        if (this._connection !== undefined) {
-            return this._connection
-        }
-        let client = new WebSocketClient ()
-        await client.connect (this.uri, [this.protocol])
-        this._connection = client
-        return this._connection
+    p.reject = function () {
+        p.resolved = true
+        clearTimeout (bogusTimeout)
+        reject.apply (this, arguments)
+    }
+
+    return p
+}
+
+class UnifiedWebsocket {
+    constructor (uri) {
+        this._wsp = new WebSocketAsPromised (uri, {
+            createWebSocket: url => new W3CWebSocket(url)
+        });
+        this.ws = this._wsp.ws
+        this.queue = []
+        this.callbacks = []
+        // Translates push style into pull style
+        this.addCallback((message) => { if (this.queue.length > 0) { this.queue.shift ().resolve (message)} })
+    }
+
+    async isOpen () {
+        return this._wsp.isOpened || this._wsp.closing
     }
 
     async send (data) {
         await this.connect ()
-        return this._connection.send (data)
+        this._wsp.send (data)
     }
 
     async recv () {
         await this.connect ()
-        return await this._connection.receive ()
+        let promise = new externallyResolvablePromise ()
+        this.queue.push (promise)
+        return promise
+    }
+
+    async open () {
+        if (!this.isOpen ()) {
+            return await this._wsp.open()
+        }
+    }
+
+    addCallback (callback) {
+        this.callbacks.push (callback)
+        this._wsp.onMessage.addListener (callback)
+    }
+
+    async connect () {
+        await this._wsp.open()
+    }
+
+    async close () {
+        await this._wsp.close()
     }
 }
 
-mysocket = new UnifiedWebsocket ('wss://stream.binance.com:9443/ws/bnbbtc@kline_1d')
-;(async () => {
-    console.log (await mysocket.recv ())
-    process.exit(0)
+const myWs = new UnifiedWebsocket ('wss://stream.binance.com:9443/ws/ethbtc@depth');
+myWs.addCallback((msg) => { console.log ("Inside callback: " + msg) })
+
+
+;(async function foo () {
+    await myWs.open ()
+    console.log(await myWs.recv ())
+    console.log (await myWs.recv ())
+    console.log (await myWs.recv ())
+    await myWs.close ()
 }) ()

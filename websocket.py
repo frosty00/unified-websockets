@@ -7,24 +7,70 @@ class UnifiedWebsocket:
         self.uri = uri
         self.protocol = protocol
         self._connection = None
+        self.callbacks = []
+        self.ws = websockets.connect(self.uri, subprotocols=self.protocol)
+        asyncio.ensure_future(self.callbackLoop())
+        self.lastFuture = None
+        self.loop = asyncio.get_event_loop()  # should be able to pass it
+        self.lock = asyncio.Lock()
 
-    async def connect(self):
-        if self._connection is not None:
+    async def open(self):
+        async with self.lock:
+            if self._connection is not None:
+                return self._connection
+            self._connection = await self.ws.__aenter__()
             return self._connection
-        context = websockets.connect(self.uri, subprotocols=self.protocol)
-        self._connection = await context.__aenter__()
-        return self._connection
 
     async def send(self, data):
-        await self.connect()
+        await self.open()
         return await self._connection.send(data)
 
     async def recv(self):
-        await self.connect()
-        return await self._connection.recv()
+        await self.open()
+        return await self.lastFuture
+
+    async def isOpen(self):
+        async with self.lock:
+            if self._connection is None:
+                return False
+            return self._connection.open
+
+    def addCallback(self, callback):
+        self.callbacks.append(callback)
+
+    async def close(self):
+        async with self.lock:
+            await self._connection.close()
+            await self.ws.__aexit__(None, None, None)
+
+    async def callbackLoop(self):
+        """Translates pull style into push style"""
+        await self.open()
+        while await self.isOpen():
+            self.lastFuture = loop.create_task(self._connection.recv())
+            async with self.lock:
+                msg = await self.lastFuture
+            for callback in self.callbacks:
+                callback(msg)
+        print('finished')
+
+
+def onMessage(msg):
+    print('inside callback: ' + msg)
+
+
+myWs = UnifiedWebsocket('wss://stream.binance.com:9443/ws/ethbtc@kline_1d')
+myWs.addCallback(onMessage)
+
+
+async def test ():
+    await myWs.open()
+    print(await myWs.recv())
+    print(await myWs.recv())
+    print(await myWs.recv())
+    await myWs.close()
 
 
 loop = asyncio.get_event_loop()
-ws = UnifiedWebsocket('wss://stream.binance.com:9443/ws/bnbbtc@kline_1d')
-print(loop.run_until_complete(ws.recv()))
-
+asyncio.ensure_future(test(), loop=loop)
+loop.run_forever()
