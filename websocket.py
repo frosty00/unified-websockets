@@ -45,14 +45,13 @@ class UnifiedWebsocket:
         await self.open()
         while True:
             async with self.lock:
-                is_open = self.isOpen()
-                if is_open:
+                if self.isOpen():
                     self.lastFuture = loop.create_task(self._connection.recv())
                     msg = await self.lastFuture
                     for callback in self.callbacks:
                         callback(msg)
-            if not is_open:
-                break
+                else:
+                    break
 
 
 def onMessage(msg):
