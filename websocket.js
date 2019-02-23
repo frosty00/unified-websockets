@@ -41,7 +41,7 @@ class UnifiedWebsocket {
         this.addCallback((message) => { if (this.queue.length > 0) { this.queue.shift ().resolve (message)} })
     }
 
-    async isOpen () {
+    isOpen () {
         return this._wsp.isOpened || this._wsp.closing
     }
 

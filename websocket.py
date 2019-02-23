@@ -29,11 +29,8 @@ class UnifiedWebsocket:
         await self.open()
         return await self.lastFuture
 
-    async def isOpen(self):
-        async with self.lock:
-            if self._connection is None:
-                return False
-            return self._connection.open
+    def isOpen(self):
+        return self._connection is not None and self._connection.open
 
     def addCallback(self, callback):
         self.callbacks.append(callback)
@@ -46,13 +43,16 @@ class UnifiedWebsocket:
     async def callbackLoop(self):
         """Translates pull style into push style"""
         await self.open()
-        while await self.isOpen():
-            self.lastFuture = loop.create_task(self._connection.recv())
+        while True:
             async with self.lock:
-                msg = await self.lastFuture
-            for callback in self.callbacks:
-                callback(msg)
-        print('finished')
+                is_open = self.isOpen()
+                if is_open:
+                    self.lastFuture = loop.create_task(self._connection.recv())
+                    msg = await self.lastFuture
+                    for callback in self.callbacks:
+                        callback(msg)
+            if not is_open:
+                break
 
 
 def onMessage(msg):
